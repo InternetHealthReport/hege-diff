@@ -1,0 +1,74 @@
+#!/usr/bin/env python
+import requests
+import arrow
+import sys
+
+this_asn = sys.argv[1]
+this_asn_name = None
+
+'''
+do a diff of ashege changes of dependent networks
+'''
+
+nowish = arrow.utcnow()
+nowish = nowish.shift(hours=-6)
+
+intervals = [
+    ['1 day',    nowish.shift(days=-1)],
+    ['1 week',   nowish.shift(days=-7)],
+    ['1 month',  nowish.shift(months=-1)],
+    ['3 months',  nowish.shift(months=-3)],
+    ['6 months',  nowish.shift(months=-6)],
+]
+
+def _to_req( asn, timeish ):
+    day = timeish.format('YYYY-MM-DD')
+    hr  = timeish.format('HH')
+    tb = f"{day}T{hr}%3A00%3A00.000Z" # at the hour
+    url = f"https://ihr.iijlab.net/ihr/api/hegemony/?af=4&asn={asn}&timebin__gte={tb}&timebin__lte={tb}"
+    return url
+
+base_info = {}
+base_asn_set = set()
+url = _to_req( this_asn, nowish )
+req = requests.get( url )
+json = req.json()
+for entry in json['results']:
+    if 'originasn' in entry: 
+        asn = entry['originasn']
+        hege = entry['hege']
+        name = entry['originasn_name']
+        base_info[ asn ] = {'hege': hege, 'name': name} 
+        base_asn_set.add( asn )
+        this_asn_name = entry['asn_name']
+
+print(f"### Currently there are {len( base_asn_set )} dependencies on {this_asn} {this_asn_name}")
+
+for interval in intervals:
+    time_name,time_obj = interval
+    time_asn_set = set()
+    time_info = {}
+    url = _to_req( this_asn, time_obj )
+    req = requests.get( url )
+    json = req.json()
+    for entry in json['results']:
+        if 'originasn' in entry: 
+            asn = entry['originasn']
+            hege = entry['hege']
+            name = entry['originasn_name']
+            time_info[ asn ] = {'hege': hege, 'name': name} 
+            time_asn_set.add( asn )
+
+    print(f"\n### diff since {time_obj.format('YYYY-MM-DD')} ({time_name})")
+
+    added_asn_set = base_asn_set - time_asn_set
+    print(f"### ASNs added {len(added_asn_set)}")
+    for asn in sorted( added_asn_set ) :
+        print(f"+ {asn} { base_info[asn]['name'] }")
+
+    rem_asn_set = time_asn_set - base_asn_set
+    print(f"### ASNs removed {len(rem_asn_set)}")
+    for asn in sorted( rem_asn_set ):
+        print(f"- {asn} { time_info[asn]['name'] }")
+
+
